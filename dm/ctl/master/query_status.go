@@ -15,6 +15,7 @@ package master
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -42,11 +43,12 @@ type taskInfo struct {
 // NewQueryStatusCmd creates a QueryStatus command
 func NewQueryStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "query-status [-w worker ...] [task-name] [--more]",
+		Use:   "query-status [-w worker ...] [task-name] [--more] [--table]",
 		Short: "query task status",
 		Run:   queryStatusFunc,
 	}
 	cmd.Flags().BoolP("more", "", false, "whether to print the detailed task information")
+	cmd.Flags().BoolP("table", "", false, "table print")
 	return cmd
 }
 
@@ -83,9 +85,21 @@ func queryStatusFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	if resp.Result && taskName == "" && len(workers) == 0 && !more {
+	// add table print query status
+	tb, err := cmd.Flags().GetBool("table")
+	if err != nil {
+		common.PrintLines("%s", errors.ErrorStack(err))
+		return
+	}
+
+	if resp.Result && taskName == "" && len(workers) == 0 && !more && !tb {
 		result := wrapTaskResult(resp)
 		common.PrettyPrintInterface(result)
+	} else if tb {
+		result := wrapTaskResult(resp)
+		for _, t := range result.Tasks {
+			fmt.Printf("%-60s | %-25s | %-10s \n", t.TaskName, t.Workers[0], t.TaskStatus)
+		}
 	} else {
 		common.PrettyPrintResponse(resp)
 	}
@@ -130,7 +144,8 @@ func wrapTaskResult(resp *pb.QueryStatusListResponse) *taskResult {
 			case strings.HasPrefix(taskStage, stageError):
 			case subTaskStage == pb.Stage_Paused && errorOccurred(subTask.Result):
 				taskStatusMap[subTaskName] = stageError + " - Some error occurred in subtask"
-			case subTask.Unit == pb.UnitType_Sync && subTask.Stage == pb.Stage_Running && (relayStatus.Stage == pb.Stage_Paused || relayStatus.Stage == pb.Stage_Stopped):
+			//case subTask.Unit == pb.UnitType_Sync && subTask.Stage == pb.Stage_Running && (relayStatus.Stage == pb.Stage_Paused || relayStatus.Stage == pb.Stage_Stopped):
+			case subTask.Unit == pb.UnitType_Sync && subTask.Stage == pb.Stage_Running && relayStatus != nil && (relayStatus.Stage == pb.Stage_Paused || relayStatus.Stage == pb.Stage_Stopped):
 				taskStatusMap[subTaskName] = stageError + " - Relay status is " + getRelayStage(relayStatus)
 			case taskStage == pb.Stage_Paused.String():
 			case taskStage == "", subTaskStage == pb.Stage_Paused:
